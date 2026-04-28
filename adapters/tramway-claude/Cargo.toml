@@ -1,0 +1,8 @@
+[package]
+name = "tramway-claude"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tramway-core = { path = "../../tramway-core" }
+async-trait = "0.1"

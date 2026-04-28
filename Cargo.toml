@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "tramway-core",
+    "adapters/tramway-claude",
+    "adapters/tramway-ollama",
+]
+resolver = "2"
