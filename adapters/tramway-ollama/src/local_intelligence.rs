@@ -67,7 +67,7 @@ impl LocalIntelligence {
 #[async_trait]
 impl Intelligence for LocalIntelligence {
     async fn respond(&self, context: IntelligenceContext) -> Result<String, TramwayError> {
-        let mut messages: Vec<OllamaMessage> = Vec::new();
+        let mut messages: Vec<OllamaMessage> = Vec::with_capacity(context.history.len() + 2);
 
         // System prompt first (if provided).
         if !context.system.is_empty() {
@@ -109,7 +109,10 @@ impl Intelligence for LocalIntelligence {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
             return Err(TramwayError::Intelligence(format!(
                 "Ollama returned {status}: {body}"
             )));
