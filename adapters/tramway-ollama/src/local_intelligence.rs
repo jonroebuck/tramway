@@ -1,74 +1,173 @@
-//! [`Intelligence`] implementation for a locally running Ollama daemon.
+//! [`Intelligence`] implementation backed by a locally running Ollama daemon.
 //!
-//! Ollama (<https://ollama.com>) serves large language models over a local HTTP
-//! API, making it possible to run inference entirely on-device without sending
-//! data to an external service. This module provides [`LocalOllamaIntelligence`],
-//! which connects to that local daemon.
+//! [Ollama](https://ollama.com) serves large language models over a local HTTP
+//! API, enabling on-device inference without sending data to an external
+//! service. This module provides [`LocalIntelligence`], which connects to that
+//! daemon via its `/api/chat` endpoint.
 //!
-//! The default base URL is `http://localhost:11434`, matching the address that
-//! `ollama serve` listens on out of the box. Override it by constructing
-//! [`LocalOllamaIntelligence`] with [`LocalOllamaIntelligence::with_base_url`].
+//! The default Ollama address is `http://localhost:11434`, matching the port
+//! that `ollama serve` listens on out of the box.
 
 use async_trait::async_trait;
-use tramway_core::{Intelligence, IntelligenceContext, TramwayError};
+use serde::{Deserialize, Serialize};
+use tramway_core::{HistoryRole, Intelligence, IntelligenceContext, TramwayError};
 
-/// Default address used by `ollama serve` when no explicit host is configured.
-const DEFAULT_BASE_URL: &str = "http://localhost:11434";
+// ---------------------------------------------------------------------------
+// Ollama API request / response types
+// ---------------------------------------------------------------------------
 
-/// [`Intelligence`] adapter that sends requests to a locally running Ollama
-/// daemon.
-///
-/// Each instance is bound to a single model name and base URL. The struct holds
-/// no per-request mutable state, so a single instance can be shared across
-/// concurrent callers.
-pub struct LocalOllamaIntelligence {
-    /// The Ollama model to use for completions (e.g. `"llama3"`, `"mistral"`).
-    model: String,
-    /// Base URL of the Ollama HTTP API, without a trailing slash.
-    base_url: String,
+/// Wire format for a single message sent to the Ollama `/api/chat` endpoint.
+#[derive(Debug, Serialize)]
+struct OllamaMessage {
+    /// Role string expected by the Ollama API: `"user"`, `"assistant"`, or `"system"`.
+    role: &'static str,
+    /// Text content of the message.
+    content: String,
 }
 
-impl LocalOllamaIntelligence {
-    /// Create a new adapter that targets the default local Ollama address
-    /// (`http://localhost:11434`) with the given model name.
-    pub fn new(model: String) -> Self {
+/// Full request body for `POST /api/chat`.
+#[derive(Debug, Serialize)]
+struct OllamaChatRequest {
+    /// Name of the locally available model to run (e.g. `"llama3"`).
+    model: String,
+    /// Ordered list of messages forming the conversation so far.
+    messages: Vec<OllamaMessage>,
+    /// Must be `false` so the response is returned as a single JSON object
+    /// rather than a stream of newline-delimited chunks.
+    stream: bool,
+}
+
+/// Top-level response returned by `POST /api/chat` when `stream` is `false`.
+#[derive(Debug, Deserialize)]
+struct OllamaChatResponse {
+    message: OllamaChatMessage,
+}
+
+/// The assistant message embedded in [`OllamaChatResponse`].
+#[derive(Debug, Deserialize)]
+struct OllamaChatMessage {
+    content: String,
+}
+
+// ---------------------------------------------------------------------------
+// LocalIntelligence — adapter for the Ollama local LLM API
+// ---------------------------------------------------------------------------
+
+/// Adapter that implements [`Intelligence`] by forwarding requests to a locally
+/// running [Ollama](https://ollama.com/) instance via its `/api/chat` endpoint.
+///
+/// The struct holds no per-request mutable state, so a single instance can be
+/// shared across concurrent callers.
+pub struct LocalIntelligence {
+    /// Base URL of the Ollama server, without a trailing slash
+    /// (e.g. `"http://localhost:11434"`).
+    base_url: String,
+    /// Name of the model to use for completions (e.g. `"llama3"`, `"mistral"`).
+    model: String,
+    /// Shared HTTP client; reusing it enables connection pooling across calls.
+    client: reqwest::Client,
+}
+
+impl LocalIntelligence {
+    /// Create a new [`LocalIntelligence`] adapter.
+    ///
+    /// # Arguments
+    /// * `base_url` – Base URL of the Ollama server (e.g. `"http://localhost:11434"`).
+    /// * `model`    – Name of the model to use (e.g. `"llama3"`).
+    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
-            model,
-            base_url: DEFAULT_BASE_URL.to_string(),
+            base_url: base_url.into(),
+            model: model.into(),
+            client: reqwest::Client::new(),
         }
     }
 
-    /// Create a new adapter with an explicit base URL, useful when Ollama is
-    /// running on a non-default port or inside a container.
-    ///
-    /// `base_url` should not include a trailing slash
-    /// (e.g. `"http://localhost:8080"`).
-    pub fn with_base_url(model: String, base_url: String) -> Self {
-        Self { model, base_url }
+    /// Map a [`HistoryRole`] to the static role string expected by the Ollama
+    /// chat API.
+    fn role_str(role: &HistoryRole) -> &'static str {
+        match role {
+            HistoryRole::User => "user",
+            HistoryRole::Assistant => "assistant",
+            HistoryRole::System => "system",
+        }
     }
 }
 
 #[async_trait]
-impl Intelligence for LocalOllamaIntelligence {
+impl Intelligence for LocalIntelligence {
     /// Send `context` to the local Ollama daemon and return the model's reply.
     ///
-    /// Builds a POST request to `<base_url>/api/generate`, serialises the
-    /// prompt and conversation history into the Ollama request format, and
-    /// returns the model output as a plain string.
+    /// Builds a `POST /api/chat` request containing the system prompt,
+    /// conversation history, and the current user input, then deserialises the
+    /// model's response into a plain string.
     ///
     /// # Errors
     ///
     /// Returns [`TramwayError::Intelligence`] if:
     ///
     /// - The HTTP request cannot be sent (e.g. the daemon is not running).
-    /// - The response status indicates an error.
-    /// - The response body cannot be deserialised.
-    async fn respond(&self, _context: IntelligenceContext) -> Result<String, TramwayError> {
-        // Construct the generate endpoint from the configured base URL.
-        let _url = format!("{}/api/generate", self.base_url);
-        // Include the model name in the request body so Ollama knows which
-        // locally available model to run.
-        let _model = &self.model;
-        todo!()
+    /// - Ollama returns a non-2xx status code.
+    /// - The response body cannot be deserialised into the expected JSON shape.
+    async fn respond(&self, context: IntelligenceContext) -> Result<String, TramwayError> {
+        let mut messages: Vec<OllamaMessage> = Vec::with_capacity(context.history.len() + 2);
+
+        // System prompt first (if provided).
+        if !context.system.is_empty() {
+            messages.push(OllamaMessage {
+                role: "system",
+                content: context.system,
+            });
+        }
+
+        // Prior conversation turns.
+        for entry in &context.history {
+            messages.push(OllamaMessage {
+                role: Self::role_str(&entry.role),
+                content: entry.content.clone(),
+            });
+        }
+
+        // Current user input.
+        messages.push(OllamaMessage {
+            role: "user",
+            content: context.input,
+        });
+
+        let request_body = OllamaChatRequest {
+            model: self.model.clone(),
+            messages,
+            stream: false,
+        };
+
+        let url = format!("{}/api/chat", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            // Attempt to include the body in the error for easier debugging;
+            // fall back gracefully if the body itself cannot be read.
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+            return Err(TramwayError::Intelligence(format!(
+                "Ollama returned {status}: {body}"
+            )));
+        }
+
+        // Deserialise the JSON response into the expected shape.
+        let chat_response: OllamaChatResponse = response
+            .json()
+            .await
+            .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+
+        Ok(chat_response.message.content)
     }
 }

@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 tramway-core = { path = "../../tramway-core" }
 async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
