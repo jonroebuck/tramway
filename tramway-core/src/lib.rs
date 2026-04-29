@@ -111,3 +111,48 @@ impl Intelligence for MockIntelligence {
         Ok(format!("mock response to: {}", context.input))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio;
+
+    fn make_context(input: &str) -> IntelligenceContext {
+        IntelligenceContext {
+            input: input.to_string(),
+            system: "system".to_string(),
+            history: vec![],
+            metadata: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_responds_to_input() {
+        // Given a MockIntelligence and a context with input "test input"
+        // When respond is called
+        // Then the response contains "test input"
+        let intel = MockIntelligence;
+        let ctx = make_context("test input");
+        let reply = intel.respond(ctx).await.unwrap();
+        assert!(reply.contains("test input"));
+    }
+
+    #[tokio::test]
+    async fn context_history_can_be_built() {
+        // Given an IntelligenceContext with one HistoryEntry for each HistoryRole variant
+        // When the context is constructed
+        // Then the history has three entries
+        let roles = [HistoryRole::User, HistoryRole::Assistant, HistoryRole::System];
+        let history: Vec<HistoryEntry> = roles.iter().map(|role| HistoryEntry {
+            role: role.clone(),
+            content: format!("msg for {:?}", role),
+        }).collect();
+        let ctx = IntelligenceContext {
+            input: "input".to_string(),
+            system: "system".to_string(),
+            history: history.clone(),
+            metadata: Default::default(),
+        };
+        assert_eq!(ctx.history.len(), 3);
+    }
+}

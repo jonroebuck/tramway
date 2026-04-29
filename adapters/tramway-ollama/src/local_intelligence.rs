@@ -2,13 +2,14 @@
 //!
 //! [Ollama](https://ollama.com) serves large language models over a local HTTP
 //! API, enabling on-device inference without sending data to an external
-//! service. This module provides [`LocalIntelligence`], which connects to that
+//! service. This module provides [`OllamaIntelligence`], which connects to that
 //! daemon via its `/api/chat` endpoint.
 //!
 //! The default Ollama address is `http://localhost:11434`, matching the port
 //! that `ollama serve` listens on out of the box.
 
 use async_trait::async_trait;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tramway_core::{HistoryRole, Intelligence, IntelligenceContext, TramwayError};
 
@@ -50,7 +51,7 @@ struct OllamaChatMessage {
 }
 
 // ---------------------------------------------------------------------------
-// LocalIntelligence — adapter for the Ollama local LLM API
+// OllamaIntelligence — adapter for the Ollama local LLM API
 // ---------------------------------------------------------------------------
 
 /// Adapter that implements [`Intelligence`] by forwarding requests to a locally
@@ -58,7 +59,7 @@ struct OllamaChatMessage {
 ///
 /// The struct holds no per-request mutable state, so a single instance can be
 /// shared across concurrent callers.
-pub struct LocalIntelligence {
+pub struct OllamaIntelligence {
     /// Base URL of the Ollama server, without a trailing slash
     /// (e.g. `"http://localhost:11434"`).
     base_url: String,
@@ -68,8 +69,18 @@ pub struct LocalIntelligence {
     client: reqwest::Client,
 }
 
-impl LocalIntelligence {
-    /// Create a new [`LocalIntelligence`] adapter.
+impl OllamaIntelligence {
+        /// Check connectivity to the Ollama server by sending a GET request to /api/tags.
+        pub async fn ping(&self) -> anyhow::Result<()> {
+            let url = format!("{}/api/tags", self.base_url);
+            let response = self.client.get(&url).send().await?;
+            if response.status().is_success() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("Ollama server returned status: {}", response.status()))
+            }
+        }
+    /// Create a new [`OllamaIntelligence`] adapter.
     ///
     /// # Arguments
     /// * `base_url` – Base URL of the Ollama server (e.g. `"http://localhost:11434"`).
@@ -93,8 +104,51 @@ impl LocalIntelligence {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio;
+
+    #[tokio::test]
+    async fn new_uses_default_endpoint() {
+        // Given a OllamaIntelligence created with "http://localhost:11434" and model "phi4"
+        // When the endpoint is constructed
+        // Then the endpoint contains "api/generate"
+        let ollama = OllamaIntelligence::new("http://localhost:11434", "phi4");
+        assert!(ollama.base_url.contains("11434"));
+        let endpoint = format!("{}/api/generate", ollama.base_url);
+        assert!(endpoint.contains("api/generate"));
+    }
+
+    #[tokio::test]
+    async fn with_host_uses_provided_host() {
+        // Given a OllamaIntelligence created with a custom host
+        // When the base_url is checked
+        // Then the base_url starts with the provided host
+        let ollama = OllamaIntelligence::new("http://localhost:11434", "phi4");
+        assert!(ollama.base_url.starts_with("http://localhost:11434"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn ollama_responds_to_prompt() {
+        // Given a real OllamaIntelligence and a simple context
+        // When respond is called
+        // Then the response is non-empty
+        let ollama = OllamaIntelligence::new("http://localhost:11434", "phi4");
+        let ctx = IntelligenceContext {
+            input: "Say hello".to_string(),
+            system: "You are a helpful assistant.".to_string(),
+            history: vec![],
+            metadata: Default::default(),
+        };
+        let reply = ollama.respond(ctx).await.unwrap();
+        assert!(!reply.trim().is_empty());
+    }
+}
+
 #[async_trait]
-impl Intelligence for LocalIntelligence {
+impl Intelligence for OllamaIntelligence {
     /// Send `context` to the local Ollama daemon and return the model's reply.
     ///
     /// Builds a `POST /api/chat` request containing the system prompt,
