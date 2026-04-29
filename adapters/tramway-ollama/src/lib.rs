@@ -37,10 +37,10 @@ use tramway_core::{Intelligence, IntelligenceContext, TramwayError};
 
 /// [`Intelligence`] adapter that forwards requests to an Ollama endpoint.
 ///
-/// This is a thin facade over [`local_intelligence::LocalOllamaIntelligence`]
-/// for callers that do not need to configure the target host or model directly.
-/// For full control, construct a [`local_intelligence::LocalOllamaIntelligence`]
-/// directly.
+/// This is a general-purpose entry point for callers that do not need to
+/// configure the target host or model explicitly. For full control over the
+/// Ollama base URL and model name, construct a
+/// [`local_intelligence::LocalOllamaIntelligence`] directly.
 pub struct OllamaIntelligence;
 
 #[async_trait]
