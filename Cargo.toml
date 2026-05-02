@@ -3,5 +3,6 @@ members = [
     "tramway-core",
     "adapters/tramway-claude",
     "adapters/tramway-ollama",
+    "protocols/tramway-protocol-openai",
 ]
 resolver = "2"
