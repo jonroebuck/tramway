@@ -1,0 +1,21 @@
+services:
+  tramway:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      TRAMWAY_PORT: ${TRAMWAY_PORT}
+
+  ollama:
+    image: ollama/ollama
+    profiles:
+      - bundled
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
