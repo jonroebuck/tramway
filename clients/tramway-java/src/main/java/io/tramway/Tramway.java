@@ -23,11 +23,9 @@ public class Tramway {
     }
 
     public String complete(String model, String message) throws TramwayException {
-        String escapedModel = jsonEscape(model);
-        String escapedMessage = jsonEscape(message);
-        String jsonBody = "{\"model\":\"" + escapedModel + "\","
-                + "\"messages\":[{\"role\":\"user\",\"content\":\"" + escapedMessage + "\"}]}";
-        return sendRequest(jsonBody);
+        java.util.List<CompletionBuilder.Message> messages = 
+        java.util.List.of(new CompletionBuilder.Message("user", message));
+        return sendRequest(RequestSerializer.serialize(model, null, messages, null));
     }
 
     public CompletionBuilder builder(String model) {
