@@ -15,9 +15,9 @@ pub struct AdapterRegistry {
 
 impl AdapterRegistry {
     pub fn new(ollama_url: Option<String>, anthropic_api_key: Option<String>) -> Self {
-        let ollama = ollama_url.map(|url| Arc::new(OllamaIntelligence::new(url)));
+        let ollama = ollama_url.map(|url| Arc::new(OllamaIntelligence::new(&url)));
 
-        let claude = anthropic_api_key.map(|key| Arc::new(ClaudeIntelligence::new(key)));
+        let claude = anthropic_api_key.map(|_key| Arc::new(ClaudeIntelligence::new()));
 
         AdapterRegistry { ollama, claude }
     }
@@ -39,11 +39,11 @@ impl AdapterRegistry {
         match provider {
             "ollama" => {
                 let adapter = self.ollama.as_ref().ok_or(AdapterError::NotConfigured("ollama"))?;
-                adapter.complete(ctx).await.map_err(AdapterError::Intelligence)
+                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
             }
             "claude" => {
                 let adapter = self.claude.as_ref().ok_or(AdapterError::NotConfigured("claude"))?;
-                adapter.complete(ctx).await.map_err(AdapterError::Intelligence)
+                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
             }
             other => Err(AdapterError::UnknownProvider(other.to_string())),
         }
