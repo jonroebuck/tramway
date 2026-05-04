@@ -1,39 +1,40 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tramway_core::{Intelligence, IntelligenceContext, TramwayError};
 use tramway_ollama::OllamaIntelligence;
 use tramway_claude::ClaudeIntelligence;
 
-/// Holds configured adapter instances and routes by provider name.
-///
-/// This is built once at startup and shared across all requests via `AppState`.
-/// Adding a new backend adapter means adding a field here and a match arm in
-/// `get()`.
 pub struct AdapterRegistry {
     ollama: Option<Arc<OllamaIntelligence>>,
     claude: Option<Arc<ClaudeIntelligence>>,
+    // Catch-all for externally registered adapters
+    external: HashMap<String, Arc<dyn Intelligence + Send + Sync>>,
 }
 
 impl AdapterRegistry {
     pub fn new(ollama_url: Option<String>, anthropic_api_key: Option<String>) -> Self {
         let ollama = ollama_url.map(|url| Arc::new(OllamaIntelligence::new(&url)));
-
         let claude = anthropic_api_key.map(|_key| Arc::new(ClaudeIntelligence::new()));
-
-        AdapterRegistry { ollama, claude }
+        AdapterRegistry { ollama, claude, external: HashMap::new() }
     }
 
-    /// Look up the adapter for a given provider string and run a completion.
-    ///
-    /// The `model` argument is the bare model name (prefix already stripped by
-    /// the protocol layer), e.g. `"phi4"` or `"sonnet"`.
+    /// Register an arbitrary adapter under a fully-qualified provider name,
+    /// e.g. `"internal/falcon"`. Called at startup before the server binds.
+    pub fn register_external(
+        &mut self,
+        name: impl Into<String>,
+        adapter: impl Intelligence + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.external.insert(name.into(), Arc::new(adapter));
+        self
+    }
+
     pub async fn complete(
         &self,
         provider: &str,
         model: &str,
         mut ctx: IntelligenceContext,
     ) -> Result<String, AdapterError> {
-        // Inject the model name into metadata so the adapter knows which
-        // model to request — avoids changing the Intelligence trait signature.
         ctx.metadata.insert("model".to_string(), model.to_string());
 
         match provider {
@@ -45,15 +46,20 @@ impl AdapterRegistry {
                 let adapter = self.claude.as_ref().ok_or(AdapterError::NotConfigured("claude"))?;
                 adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
             }
-            other => Err(AdapterError::UnknownProvider(other.to_string())),
+            other => {
+                // Check external registry before giving up
+                let adapter = self.external.get(other)
+                    .ok_or_else(|| AdapterError::UnknownProvider(other.to_string()))?;
+                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
+            }
         }
     }
 
-    /// List the providers that are currently configured and available.
-    pub fn available_providers(&self) -> Vec<&'static str> {
+    pub fn available_providers(&self) -> Vec<String> {
         let mut providers = vec![];
-        if self.ollama.is_some() { providers.push("ollama"); }
-        if self.claude.is_some() { providers.push("claude"); }
+        if self.ollama.is_some() { providers.push("ollama".to_string()); }
+        if self.claude.is_some() { providers.push("claude".to_string()); }
+        providers.extend(self.external.keys().cloned());
         providers
     }
 }
