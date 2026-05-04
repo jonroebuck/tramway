@@ -7,6 +7,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       TRAMWAY_PORT: ${TRAMWAY_PORT}
+    depends_on:
+      ollama:
+        condition: service_started
+        required: false
 
   ollama:
     image: ollama/ollama
