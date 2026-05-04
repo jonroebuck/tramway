@@ -12,8 +12,9 @@ path = "src/main.rs"
 tramway-core = { path = "../tramway-core" }
 tramway-ollama = { path = "../adapters/tramway-ollama" }
 tramway-claude = { path = "../adapters/tramway-claude" }
+tramway-openai = { path = "../adapters/tramway-openai" }
+tramway-gemini = { path = "../adapters/tramway-gemini" }
 tramway-protocol-openai = { path = "../protocols/tramway-protocol-openai" }
-
 axum = { version = "0.7", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"
