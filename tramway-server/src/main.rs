@@ -7,7 +7,7 @@ use axum::{Router, routing::{get, post}};
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{error, info, warn};
 
 use ollama_detect::detect_ollama;
 use registry::AdapterRegistry;
@@ -38,18 +38,33 @@ async fn main() {
         }
     };
 
-    if let Some(ref url) = ollama_url {
-        info!("Ollama available at {url}");
-    } else {
-        info!("Ollama not detected — ollama/* models will return errors");
+    // ── API key detection ─────────────────────────────────────────────────
+    let anthropic_api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+
+    // ── Provider availability summary ─────────────────────────────────────
+    match (&ollama_url, &anthropic_api_key) {
+        (None, None) => {
+            error!("No intelligence providers are configured.");
+            error!("Set ANTHROPIC_API_KEY to enable Claude, or start Ollama to enable local models.");
+            error!("Tramway cannot start without at least one provider.");
+            std::process::exit(1);
+        }
+        (Some(url), None) => {
+            info!("Ollama detected at {url}");
+            warn!("ANTHROPIC_API_KEY not set — Claude will not be available");
+        }
+        (None, Some(_)) => {
+            info!("Claude configured");
+            warn!("Ollama not detected — ollama/* models will not be available");
+        }
+        (Some(url), Some(_)) => {
+            info!("Ollama detected at {url}");
+            info!("Claude configured");
+        }
     }
 
     // ── Adapter registry ─────────────────────────────────────────────────
-    let registry = AdapterRegistry::new(
-        ollama_url,
-        std::env::var("ANTHROPIC_API_KEY").ok(),
-    );
-
+    let registry = AdapterRegistry::new(ollama_url, anthropic_api_key);
     let state = AppState::new(registry);
 
     // ── Router ───────────────────────────────────────────────────────────
