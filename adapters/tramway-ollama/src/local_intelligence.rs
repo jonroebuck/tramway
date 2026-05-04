@@ -63,8 +63,6 @@ pub struct OllamaIntelligence {
     /// Base URL of the Ollama server, without a trailing slash
     /// (e.g. `"http://localhost:11434"`).
     base_url: String,
-    /// Name of the model to use for completions (e.g. `"llama3"`, `"mistral"`).
-    model: String,
     /// Shared HTTP client; reusing it enables connection pooling across calls.
     client: reqwest::Client,
 }
@@ -84,11 +82,9 @@ impl OllamaIntelligence {
     ///
     /// # Arguments
     /// * `base_url` – Base URL of the Ollama server (e.g. `"http://localhost:11434"`).
-    /// * `model`    – Name of the model to use (e.g. `"llama3"`).
-    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            model: model.into(),
             client: reqwest::Client::new(),
         }
     }
@@ -114,7 +110,7 @@ mod tests {
         // Given a OllamaIntelligence created with "http://localhost:11434" and model "phi4"
         // When the endpoint is constructed
         // Then the endpoint contains "api/generate"
-        let ollama = OllamaIntelligence::new("http://localhost:11434", "phi4");
+        let ollama = OllamaIntelligence::new("http://localhost:11434");
         assert!(ollama.base_url.contains("11434"));
         let endpoint = format!("{}/api/generate", ollama.base_url);
         assert!(endpoint.contains("api/generate"));
@@ -125,7 +121,7 @@ mod tests {
         // Given a OllamaIntelligence created with a custom host
         // When the base_url is checked
         // Then the base_url starts with the provided host
-        let ollama = OllamaIntelligence::new("http://localhost:11434", "phi4");
+        let ollama = OllamaIntelligence::new("http://localhost:11434");
         assert!(ollama.base_url.starts_with("http://localhost:11434"));
     }
 
@@ -135,12 +131,14 @@ mod tests {
         // Given a real OllamaIntelligence and a simple context
         // When respond is called
         // Then the response is non-empty
-        let ollama = OllamaIntelligence::new("http://localhost:11434", "phi4");
+        let ollama = OllamaIntelligence::new("http://localhost:11434");
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("model".to_string(), "phi4".to_string());
         let ctx = IntelligenceContext {
             input: "Say hello".to_string(),
             system: "You are a helpful assistant.".to_string(),
             history: vec![],
-            metadata: Default::default(),
+            metadata,
         };
         let reply = ollama.respond(ctx).await.unwrap();
         assert!(!reply.trim().is_empty());
@@ -163,6 +161,12 @@ impl Intelligence for OllamaIntelligence {
     /// - Ollama returns a non-2xx status code.
     /// - The response body cannot be deserialised into the expected JSON shape.
     async fn respond(&self, context: IntelligenceContext) -> Result<String, TramwayError> {
+        let model = context
+            .metadata
+            .get("model")
+            .ok_or_else(|| TramwayError::Intelligence("model not specified in metadata".to_string()))?
+            .clone();
+
         let mut messages: Vec<OllamaMessage> = Vec::with_capacity(context.history.len() + 2);
 
         // System prompt first (if provided).
@@ -188,7 +192,7 @@ impl Intelligence for OllamaIntelligence {
         });
 
         let request_body = OllamaChatRequest {
-            model: self.model.clone(),
+            model,
             messages,
             stream: false,
         };
