@@ -15,14 +15,48 @@ repositories {
     mavenCentral()
 }
 
+// Zero runtime dependencies — uses only java.net.http (JDK 11+)
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// ── Examples source set ───────────────────────────────────────────────────
+
+sourceSets {
+    examples {
+        java.srcDirs = ['src/examples/java']
+        compileClasspath += main.output
+        runtimeClasspath += main.output
+    }
+}
+
+// Compile examples whenever the main library is built
+compileExamplesJava.dependsOn compileJava
+
+// ── Run example task ──────────────────────────────────────────────────────
+
+task runExample(type: JavaExec) {
+    group = 'tramway'
+    description = 'Run the BasicExample against a running tramway-server'
+    classpath = sourceSets.examples.runtimeClasspath
+    mainClass = 'io.tramway.examples.BasicExample'
+
+    // Override the server URL if needed:
+    // TRAMWAY_URL=http://my-server:8080 ./gradlew runExample
+    def tramwayUrl = System.getenv('TRAMWAY_URL')
+    if (tramwayUrl) {
+        systemProperty 'tramway.url', tramwayUrl
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────
+
 test {
     useJUnitPlatform()
 }
+
+// ── Publishing ────────────────────────────────────────────────────────────
 
 publishing {
     publications {
