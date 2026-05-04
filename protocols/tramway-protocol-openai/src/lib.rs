@@ -43,7 +43,7 @@ pub use model::ModelTarget;
 pub use request::{ChatRequest, Message, Role, TramwayExtensions};
 pub use response::{ChatResponse, Choice, ResponseMessage, Usage};
 
-use tramway_core::{HistoryEntry, IntelligenceContext};
+use tramway_core::{HistoryEntry, HistoryRole, IntelligenceContext};
 
 /// Translate an [`IntelligenceContext`] back into a [`ChatResponse`].
 ///
@@ -131,9 +131,9 @@ impl From<&Message> for HistoryEntry {
     fn from(msg: &Message) -> Self {
         HistoryEntry {
             role: match msg.role {
-                Role::User => "user".to_string(),
-                Role::Assistant => "assistant".to_string(),
-                Role::System => "system".to_string(),
+                Role::User => HistoryRole::User,
+                Role::Assistant => HistoryRole::Assistant,
+                Role::System => HistoryRole::System,
             },
             content: msg.content.clone(),
         }
