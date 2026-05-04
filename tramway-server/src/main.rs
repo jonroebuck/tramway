@@ -64,7 +64,8 @@ async fn main() {
     }
 
     // ── Adapter registry ─────────────────────────────────────────────────
-    let registry = AdapterRegistry::new(ollama_url, anthropic_api_key);
+    let mut registry = AdapterRegistry::new(ollama_url, anthropic_api_key);
+    // external adapters registered here before the server starts
     let state = AppState::new(registry);
 
     // ── Router ───────────────────────────────────────────────────────────
