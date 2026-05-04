@@ -68,16 +68,17 @@ pub struct OllamaIntelligence {
 }
 
 impl OllamaIntelligence {
-        /// Check connectivity to the Ollama server by sending a GET request to /api/tags.
-        pub async fn ping(&self) -> anyhow::Result<()> {
-            let url = format!("{}/api/tags", self.base_url);
-            let response = self.client.get(&url).send().await?;
-            if response.status().is_success() {
-                Ok(())
-            } else {
-                Err(anyhow::anyhow!("Ollama server returned status: {}", response.status()))
-            }
+    /// Check connectivity to the Ollama server by sending a GET request to /api/tags.
+    pub async fn ping(&self) -> anyhow::Result<()> {
+        let url = format!("{}/api/tags", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Ollama server returned status: {}", response.status()))
         }
+    }
+
     /// Create a new [`OllamaIntelligence`] adapter.
     ///
     /// # Arguments
@@ -209,12 +210,23 @@ impl Intelligence for OllamaIntelligence {
 
         if !response.status().is_success() {
             let status = response.status();
-            // Attempt to include the body in the error for easier debugging;
-            // fall back gracefully if the body itself cannot be read.
             let body = response
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+
+            // Detect model-not-found specifically and give an actionable message.
+            if status == reqwest::StatusCode::NOT_FOUND
+                || (body.contains("model") && body.contains("not found"))
+            {
+                let model_name = &request_body.model;
+                return Err(TramwayError::Intelligence(format!(
+                    "Model '{model_name}' is not available in Ollama. \
+                     Pull it first with: ollama pull {model_name} \
+                     (or if using the bundled Docker profile: tramway-pull {model_name})"
+                )));
+            }
+
             return Err(TramwayError::Intelligence(format!(
                 "Ollama returned {status}: {body}"
             )));
