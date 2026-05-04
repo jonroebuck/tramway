@@ -1,4 +1,4 @@
-tramway
+#tramway
 A lightweight, model-agnostic LLM gateway written in Rust.
 Tramway sits in front of your AI providers and gives you a single, stable endpoint to talk to — regardless of whether you're running a local Ollama instance, hitting the Claude API, or using OpenAI or Gemini. Swap providers or add new ones without changing your client code.
 How it works
