@@ -1,0 +1,37 @@
+#!/bin/bash
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: tramway-pull <model-name>"
+    echo ""
+    echo "Examples:"
+    echo "  tramway-pull phi4"
+    echo "  tramway-pull llama3"
+    exit 1
+fi
+
+MODEL_NAME="$1"
+CONTAINER_NAME="tramway-ollama-1"
+
+# Check if the Ollama container is running
+if ! docker ps --filter "name=$CONTAINER_NAME" --quiet | grep -q .; then
+    echo "Error: Ollama container '$CONTAINER_NAME' is not running."
+    echo "Start it with: docker compose --profile bundled up -d"
+    exit 1
+fi
+
+echo "Pulling model '$MODEL_NAME' into Ollama..."
+docker exec -it "$CONTAINER_NAME" ollama pull "$MODEL_NAME"
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "✓ Model '$MODEL_NAME' is ready to use"
+    echo "You can now make requests like:"
+    echo "  curl -X POST http://localhost:8080/v1/chat/completions \\"
+    echo "    -H 'Content-Type: application/json' \\"
+    echo "    -d '{\"model\": \"ollama/$MODEL_NAME\", \"messages\": [{\"role\": \"user\", \"content\": \"hello\"}]}'"
+else
+    echo ""
+    echo "✗ Failed to pull model '$MODEL_NAME'"
+    exit 1
+fi
