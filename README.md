@@ -110,3 +110,11 @@ The adapter is compiled in but never needs to be published.
 | `tramway-openai` | OpenAI backend adapter |
 | `tramway-gemini` | Google Gemini backend adapter |
 | `tramway-protocol-openai` | OpenAI wire format — decodes incoming requests and encodes responses |
+
+## Pulling models with the bundled profile
+
+If you're running the bundled Docker profile, use the included tramway-pull script to download models into the containerized Ollama instance:
+bash./tramway-pull phi4
+./tramway-pull llama3
+This is equivalent to ollama pull but targets the Ollama container rather than a local installation. Models are persisted in a Docker volume and survive container restarts.
+If you have Ollama installed natively, just use ollama pull as normal — Tramway will detect it automatically on startup.
