@@ -2,17 +2,21 @@ use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+// --- Request types ---
+
 #[derive(Serialize)]
-struct ChatRequest<'a> {
-    model: &'a str,
-    messages: Vec<Message<'a>>,
+struct ChatRequest {
+    model: String,
+    messages: Vec<Message>,
 }
 
 #[derive(Serialize)]
-struct Message<'a> {
-    role: &'a str,
-    content: &'a str,
+struct Message {
+    role: String,
+    content: String,
 }
+
+// --- Response types ---
 
 #[derive(Deserialize)]
 struct ChatResponse {
@@ -28,6 +32,8 @@ struct Choice {
 struct ResponseMessage {
     content: Option<String>,
 }
+
+// --- Client ---
 
 pub struct Tramway {
     client: Client,
@@ -48,7 +54,7 @@ impl Tramway {
         }
     }
 
-    /// Simple one-liner completion
+    /// Simple one-liner completion — no system prompt
     pub async fn complete(&self, model: &str, prompt: &str) -> Result<String> {
         self.respond(model, "", prompt).await
     }
@@ -58,12 +64,21 @@ impl Tramway {
         let mut messages = vec![];
 
         if !system.is_empty() {
-            messages.push(Message { role: "system", content: system });
+            messages.push(Message {
+                role: "system".to_string(),
+                content: system.to_string(),
+            });
         }
 
-        messages.push(Message { role: "user", content: input });
+        messages.push(Message {
+            role: "user".to_string(),
+            content: input.to_string(),
+        });
 
-        let request = ChatRequest { model, messages };
+        let request = ChatRequest {
+            model: model.to_string(),
+            messages,
+        };
 
         let response = self.client
             .post(format!("{}/v1/chat/completions", self.base_url))
