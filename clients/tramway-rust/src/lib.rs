@@ -61,12 +61,35 @@ impl Tramway {
 
     /// Full completion with system prompt
     pub async fn respond(&self, model: &str, system: &str, input: &str) -> Result<String> {
+        self.respond_with_history(model, system, input, vec![]).await
+    }
+
+    /// Full completion with system prompt and prior conversation history.
+    /// Each entry in `history` is a `(user, assistant)` pair of prior turns.
+    pub async fn respond_with_history(
+        &self,
+        model: &str,
+        system: &str,
+        input: &str,
+        history: Vec<(String, String)>,
+    ) -> Result<String> {
         let mut messages = vec![];
 
         if !system.is_empty() {
             messages.push(Message {
                 role: "system".to_string(),
                 content: system.to_string(),
+            });
+        }
+
+        for (user_turn, assistant_turn) in history {
+            messages.push(Message {
+                role: "user".to_string(),
+                content: user_turn,
+            });
+            messages.push(Message {
+                role: "assistant".to_string(),
+                content: assistant_turn,
             });
         }
 

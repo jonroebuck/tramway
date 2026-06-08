@@ -5,5 +5,6 @@ members = [
     "adapters/tramway-claude",
     "adapters/tramway-ollama",
     "protocols/tramway-protocol-openai",
+    "clients/tramway-rust",
 ]
 resolver = "2"
