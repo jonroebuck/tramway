@@ -22,7 +22,7 @@ pub struct ChatRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
 
-    /// Whether to stream the response. Reserved for future use.
+    /// Whether to stream the response as OpenAI-compatible SSE chunks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 

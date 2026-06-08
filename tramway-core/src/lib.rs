@@ -24,8 +24,10 @@
 //! ```
 
 use std::collections::HashMap;
+use std::pin::Pin;
 
 use async_trait::async_trait;
+use futures_core::Stream;
 use thiserror::Error;
 
 /// The top-level error type for all tramway operations.
@@ -87,6 +89,9 @@ pub struct IntelligenceContext {
 ///
 /// Adapters wrap a concrete AI provider (Ollama, Claude, …) and expose it
 /// through this single async method, keeping callers provider-agnostic.
+pub type ResponseStream =
+    Pin<Box<dyn Stream<Item = Result<String, TramwayError>> + Send + 'static>>;
+
 #[async_trait]
 pub trait Intelligence {
     /// Ask the underlying provider to respond to `context`.
@@ -94,6 +99,20 @@ pub trait Intelligence {
     /// Returns the provider's reply as a plain string, or a [`TramwayError`]
     /// if the request fails for any reason.
     async fn respond(&self, context: IntelligenceContext) -> Result<String, TramwayError>;
+
+    /// Ask the underlying provider to stream a response for `context`.
+    ///
+    /// The default implementation preserves existing adapter behaviour by
+    /// calling [`Intelligence::respond`] and emitting exactly one streamed item.
+    async fn respond_stream(
+        &self,
+        context: IntelligenceContext,
+    ) -> Result<ResponseStream, TramwayError> {
+        let output = self.respond(context).await?;
+        Ok(Box::pin(futures_util::stream::once(
+            async move { Ok(output) },
+        )))
+    }
 }
 
 /// A test-only [`Intelligence`] that echoes the input back without calling any
@@ -142,11 +161,18 @@ mod tests {
         // Given an IntelligenceContext with one HistoryEntry for each HistoryRole variant
         // When the context is constructed
         // Then the history has three entries
-        let roles = [HistoryRole::User, HistoryRole::Assistant, HistoryRole::System];
-        let history: Vec<HistoryEntry> = roles.iter().map(|role| HistoryEntry {
-            role: role.clone(),
-            content: format!("msg for {:?}", role),
-        }).collect();
+        let roles = [
+            HistoryRole::User,
+            HistoryRole::Assistant,
+            HistoryRole::System,
+        ];
+        let history: Vec<HistoryEntry> = roles
+            .iter()
+            .map(|role| HistoryEntry {
+                role: role.clone(),
+                content: format!("msg for {:?}", role),
+            })
+            .collect();
         let ctx = IntelligenceContext {
             input: "input".to_string(),
             system: "system".to_string(),
@@ -154,5 +180,18 @@ mod tests {
             metadata: Default::default(),
         };
         assert_eq!(ctx.history.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn default_stream_emits_single_item() {
+        let intel = MockIntelligence;
+        let ctx = make_context("stream input");
+        let mut stream = intel.respond_stream(ctx).await.unwrap();
+
+        use futures_util::StreamExt;
+
+        let first = stream.next().await.unwrap().unwrap();
+        assert!(first.contains("stream input"));
+        assert!(stream.next().await.is_none());
     }
 }
