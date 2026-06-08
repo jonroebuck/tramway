@@ -3,7 +3,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 // --- Request types ---
-
 #[derive(Serialize)]
 struct ChatRequest {
     model: String,
@@ -17,7 +16,6 @@ struct Message {
 }
 
 // --- Response types ---
-
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
@@ -34,7 +32,6 @@ struct ResponseMessage {
 }
 
 // --- Client ---
-
 pub struct Tramway {
     client: Client,
     base_url: String,
@@ -59,8 +56,20 @@ impl Tramway {
         self.respond(model, "", prompt).await
     }
 
-    /// Full completion with system prompt
+    /// Full completion with system prompt, no history
     pub async fn respond(&self, model: &str, system: &str, input: &str) -> Result<String> {
+        self.respond_with_history(model, system, input, vec![]).await
+    }
+
+    /// Full completion with system prompt and conversation history.
+    /// History is a Vec of (role, content) tuples where role is "user" or "assistant".
+    pub async fn respond_with_history(
+        &self,
+        model: &str,
+        system: &str,
+        input: &str,
+        history: Vec<(String, String)>,
+    ) -> Result<String> {
         let mut messages = vec![];
 
         if !system.is_empty() {
@@ -68,6 +77,10 @@ impl Tramway {
                 role: "system".to_string(),
                 content: system.to_string(),
             });
+        }
+
+        for (role, content) in history {
+            messages.push(Message { role, content });
         }
 
         messages.push(Message {
