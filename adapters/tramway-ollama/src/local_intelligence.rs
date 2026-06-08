@@ -181,6 +181,17 @@ impl OllamaIntelligence {
             "Ollama returned {status}: {body}"
         )))
     }
+
+    fn parse_stream_line(raw: &str) -> Result<(Option<String>, bool), TramwayError> {
+        let chunk: OllamaStreamChunk =
+            serde_json::from_str(raw).map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+        // Ollama emits control/finalization chunks with empty content; only forward
+        // text-bearing chunks to callers.
+        let content = chunk
+            .message
+            .and_then(|message| (!message.content.is_empty()).then_some(message.content));
+        Ok((content, chunk.done))
+    }
 }
 
 #[cfg(test)]
@@ -309,16 +320,12 @@ impl Intelligence for OllamaIntelligence {
                         continue;
                     }
 
-                    let chunk: OllamaStreamChunk = serde_json::from_str(raw)
-                        .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
-
-                    if let Some(message) = chunk.message {
-                        if !message.content.is_empty() {
-                            yield message.content;
-                        }
+                    let (content, done) = Self::parse_stream_line(raw)?;
+                    if let Some(content) = content {
+                        yield content;
                     }
 
-                    if chunk.done {
+                    if done {
                         return;
                     }
                 }
@@ -329,12 +336,9 @@ impl Intelligence for OllamaIntelligence {
                     .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
                 let raw = raw.trim();
                 if !raw.is_empty() {
-                    let chunk: OllamaStreamChunk = serde_json::from_str(raw)
-                        .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
-                    if let Some(message) = chunk.message {
-                        if !message.content.is_empty() {
-                            yield message.content;
-                        }
+                    let (content, _) = Self::parse_stream_line(raw)?;
+                    if let Some(content) = content {
+                        yield content;
                     }
                 }
             }
