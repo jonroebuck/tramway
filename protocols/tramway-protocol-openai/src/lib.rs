@@ -41,7 +41,10 @@ pub mod response;
 pub use error::ProtocolError;
 pub use model::ModelTarget;
 pub use request::{ChatRequest, Message, Role, TramwayExtensions};
-pub use response::{ChatResponse, Choice, ResponseMessage, Usage};
+pub use response::{
+    ChatCompletionChunk, ChatResponse, Choice, ChunkChoice, DeltaMessage, ResponseMessage,
+    StreamEncoder, Usage,
+};
 
 use tramway_core::{HistoryEntry, HistoryRole, IntelligenceContext};
 

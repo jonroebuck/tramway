@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tramway_core::{Intelligence, IntelligenceContext, TramwayError};
-use tramway_ollama::OllamaIntelligence;
 use tramway_claude::ClaudeIntelligence;
-use tramway_openai::OpenAiIntelligence;
+use tramway_core::{Intelligence, IntelligenceContext, ResponseStream, TramwayError};
 use tramway_gemini::GeminiIntelligence;
+use tramway_ollama::OllamaIntelligence;
+use tramway_openai::OpenAiIntelligence;
 
 pub struct AdapterRegistry {
     ollama: Option<Arc<OllamaIntelligence>>,
@@ -25,7 +25,13 @@ impl AdapterRegistry {
         let claude = anthropic_api_key.map(|_| Arc::new(ClaudeIntelligence::new()));
         let openai = openai_api_key.map(|_| Arc::new(OpenAiIntelligence::new()));
         let gemini = gemini_api_key.map(|_| Arc::new(GeminiIntelligence::new()));
-        AdapterRegistry { ollama, claude, openai, gemini, external: HashMap::new() }
+        AdapterRegistry {
+            ollama,
+            claude,
+            openai,
+            gemini,
+            external: HashMap::new(),
+        }
     }
 
     pub fn register_external(
@@ -47,35 +53,134 @@ impl AdapterRegistry {
 
         match provider {
             "ollama" => {
-                let adapter = self.ollama.as_ref().ok_or(AdapterError::NotConfigured("ollama"))?;
-                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
+                let adapter = self
+                    .ollama
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("ollama"))?;
+                adapter
+                    .respond(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
             }
             "claude" => {
-                let adapter = self.claude.as_ref().ok_or(AdapterError::NotConfigured("claude"))?;
-                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
+                let adapter = self
+                    .claude
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("claude"))?;
+                adapter
+                    .respond(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
             }
             "openai" => {
-                let adapter = self.openai.as_ref().ok_or(AdapterError::NotConfigured("openai"))?;
-                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
+                let adapter = self
+                    .openai
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("openai"))?;
+                adapter
+                    .respond(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
             }
             "gemini" => {
-                let adapter = self.gemini.as_ref().ok_or(AdapterError::NotConfigured("gemini"))?;
-                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
+                let adapter = self
+                    .gemini
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("gemini"))?;
+                adapter
+                    .respond(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
             }
             other => {
-                let adapter = self.external.get(other)
+                let adapter = self
+                    .external
+                    .get(other)
                     .ok_or_else(|| AdapterError::UnknownProvider(other.to_string()))?;
-                adapter.respond(ctx).await.map_err(AdapterError::Intelligence)
+                adapter
+                    .respond(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
+            }
+        }
+    }
+
+    pub async fn complete_stream(
+        &self,
+        provider: &str,
+        model: &str,
+        mut ctx: IntelligenceContext,
+    ) -> Result<ResponseStream, AdapterError> {
+        ctx.metadata.insert("model".to_string(), model.to_string());
+
+        match provider {
+            "ollama" => {
+                let adapter = self
+                    .ollama
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("ollama"))?;
+                adapter
+                    .respond_stream(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
+            }
+            "claude" => {
+                let adapter = self
+                    .claude
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("claude"))?;
+                adapter
+                    .respond_stream(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
+            }
+            "openai" => {
+                let adapter = self
+                    .openai
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("openai"))?;
+                adapter
+                    .respond_stream(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
+            }
+            "gemini" => {
+                let adapter = self
+                    .gemini
+                    .as_ref()
+                    .ok_or(AdapterError::NotConfigured("gemini"))?;
+                adapter
+                    .respond_stream(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
+            }
+            other => {
+                let adapter = self
+                    .external
+                    .get(other)
+                    .ok_or_else(|| AdapterError::UnknownProvider(other.to_string()))?;
+                adapter
+                    .respond_stream(ctx)
+                    .await
+                    .map_err(AdapterError::Intelligence)
             }
         }
     }
 
     pub fn available_providers(&self) -> Vec<String> {
         let mut providers = vec![];
-        if self.ollama.is_some() { providers.push("ollama".to_string()); }
-        if self.claude.is_some() { providers.push("claude".to_string()); }
-        if self.openai.is_some() { providers.push("openai".to_string()); }
-        if self.gemini.is_some() { providers.push("gemini".to_string()); }
+        if self.ollama.is_some() {
+            providers.push("ollama".to_string());
+        }
+        if self.claude.is_some() {
+            providers.push("claude".to_string());
+        }
+        if self.openai.is_some() {
+            providers.push("openai".to_string());
+        }
+        if self.gemini.is_some() {
+            providers.push("gemini".to_string());
+        }
         providers.extend(self.external.keys().cloned());
         providers
     }

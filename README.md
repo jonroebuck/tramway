@@ -46,6 +46,24 @@ cargo run -p tramway-server
 
 Tramway auto-detects a local or sidecar Ollama instance on startup. No configuration needed if Ollama is already running.
 
+## Streaming responses
+
+Tramway supports OpenAI-compatible streaming on `/v1/chat/completions` when `"stream": true` is set:
+
+```bash
+curl -N http://localhost:8080/v1/chat/completions \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "ollama/phi4",
+    "stream": true,
+    "messages": [
+      { "role": "user", "content": "Write a haiku about Rust" }
+    ]
+  }'
+```
+
+The response is emitted as SSE `data:` events in `chat.completion.chunk` format, followed by a final `data: [DONE]` event.
+
 ## Client libraries
 
 Tramway includes client libraries for Python and Java so you don't have to construct HTTP requests by hand. Both support a simple one-liner API and a builder API for multi-turn conversations, system prompts, and extensions.

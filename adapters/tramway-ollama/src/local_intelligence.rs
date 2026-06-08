@@ -8,10 +8,10 @@
 //! The default Ollama address is `http://localhost:11434`, matching the port
 //! that `ollama serve` listens on out of the box.
 
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tramway_core::{HistoryRole, Intelligence, IntelligenceContext, TramwayError};
+use tramway_core::{HistoryRole, Intelligence, IntelligenceContext, ResponseStream, TramwayError};
 
 // ---------------------------------------------------------------------------
 // Ollama API request / response types
@@ -50,6 +50,15 @@ struct OllamaChatMessage {
     content: String,
 }
 
+/// A streaming chunk returned by `POST /api/chat` when `stream` is `true`.
+#[derive(Debug, Deserialize)]
+struct OllamaStreamChunk {
+    #[serde(default)]
+    message: Option<OllamaChatMessage>,
+    #[serde(default)]
+    done: bool,
+}
+
 // ---------------------------------------------------------------------------
 // OllamaIntelligence — adapter for the Ollama local LLM API
 // ---------------------------------------------------------------------------
@@ -75,7 +84,10 @@ impl OllamaIntelligence {
         if response.status().is_success() {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Ollama server returned status: {}", response.status()))
+            Err(anyhow::anyhow!(
+                "Ollama server returned status: {}",
+                response.status()
+            ))
         }
     }
 
@@ -98,6 +110,87 @@ impl OllamaIntelligence {
             HistoryRole::Assistant => "assistant",
             HistoryRole::System => "system",
         }
+    }
+
+    fn build_request(
+        &self,
+        context: IntelligenceContext,
+        stream: bool,
+    ) -> Result<OllamaChatRequest, TramwayError> {
+        let model = context
+            .metadata
+            .get("model")
+            .ok_or_else(|| {
+                TramwayError::Intelligence("model not specified in metadata".to_string())
+            })?
+            .clone();
+
+        let mut messages: Vec<OllamaMessage> = Vec::with_capacity(context.history.len() + 2);
+
+        if !context.system.is_empty() {
+            messages.push(OllamaMessage {
+                role: "system",
+                content: context.system,
+            });
+        }
+
+        for entry in &context.history {
+            messages.push(OllamaMessage {
+                role: Self::role_str(&entry.role),
+                content: entry.content.clone(),
+            });
+        }
+
+        messages.push(OllamaMessage {
+            role: "user",
+            content: context.input,
+        });
+
+        Ok(OllamaChatRequest {
+            model,
+            messages,
+            stream,
+        })
+    }
+
+    async fn validate_response(
+        response: reqwest::Response,
+        model_name: &str,
+    ) -> Result<reqwest::Response, TramwayError> {
+        if response.status().is_success() {
+            return Ok(response);
+        }
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+
+        if status == reqwest::StatusCode::NOT_FOUND
+            || (body.contains("model") && body.contains("not found"))
+        {
+            return Err(TramwayError::Intelligence(format!(
+                "Model '{model_name}' is not available in Ollama. \
+                 Pull it first with: ollama pull {model_name} \
+                 (or if using the bundled Docker profile: tramway-pull {model_name})"
+            )));
+        }
+
+        Err(TramwayError::Intelligence(format!(
+            "Ollama returned {status}: {body}"
+        )))
+    }
+
+    fn parse_stream_line(raw: &str) -> Result<(Option<String>, bool), TramwayError> {
+        let chunk: OllamaStreamChunk =
+            serde_json::from_str(raw).map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+        // Ollama emits control/finalization chunks with empty content; only forward
+        // text-bearing chunks to callers.
+        let content = chunk
+            .message
+            .and_then(|message| (!message.content.is_empty()).then_some(message.content));
+        Ok((content, chunk.done))
     }
 }
 
@@ -162,41 +255,7 @@ impl Intelligence for OllamaIntelligence {
     /// - Ollama returns a non-2xx status code.
     /// - The response body cannot be deserialised into the expected JSON shape.
     async fn respond(&self, context: IntelligenceContext) -> Result<String, TramwayError> {
-        let model = context
-            .metadata
-            .get("model")
-            .ok_or_else(|| TramwayError::Intelligence("model not specified in metadata".to_string()))?
-            .clone();
-
-        let mut messages: Vec<OllamaMessage> = Vec::with_capacity(context.history.len() + 2);
-
-        // System prompt first (if provided).
-        if !context.system.is_empty() {
-            messages.push(OllamaMessage {
-                role: "system",
-                content: context.system,
-            });
-        }
-
-        // Prior conversation turns.
-        for entry in &context.history {
-            messages.push(OllamaMessage {
-                role: Self::role_str(&entry.role),
-                content: entry.content.clone(),
-            });
-        }
-
-        // Current user input.
-        messages.push(OllamaMessage {
-            role: "user",
-            content: context.input,
-        });
-
-        let request_body = OllamaChatRequest {
-            model,
-            messages,
-            stream: false,
-        };
+        let request_body = self.build_request(context, false)?;
 
         let url = format!("{}/api/chat", self.base_url);
 
@@ -208,29 +267,7 @@ impl Intelligence for OllamaIntelligence {
             .await
             .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-
-            // Detect model-not-found specifically and give an actionable message.
-            if status == reqwest::StatusCode::NOT_FOUND
-                || (body.contains("model") && body.contains("not found"))
-            {
-                let model_name = &request_body.model;
-                return Err(TramwayError::Intelligence(format!(
-                    "Model '{model_name}' is not available in Ollama. \
-                     Pull it first with: ollama pull {model_name} \
-                     (or if using the bundled Docker profile: tramway-pull {model_name})"
-                )));
-            }
-
-            return Err(TramwayError::Intelligence(format!(
-                "Ollama returned {status}: {body}"
-            )));
-        }
+        let response = Self::validate_response(response, &request_body.model).await?;
 
         // Deserialise the JSON response into the expected shape.
         let chat_response: OllamaChatResponse = response
@@ -239,5 +276,74 @@ impl Intelligence for OllamaIntelligence {
             .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
 
         Ok(chat_response.message.content)
+    }
+
+    async fn respond_stream(
+        &self,
+        context: IntelligenceContext,
+    ) -> Result<ResponseStream, TramwayError> {
+        let request_body = self.build_request(context, true)?;
+        let url = format!("{}/api/chat", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+
+        let mut response = Self::validate_response(response, &request_body.model).await?;
+
+        let stream = async_stream::try_stream! {
+            let mut buffer = Vec::new();
+
+            loop {
+                let next = response
+                    .chunk()
+                    .await
+                    .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+
+                let Some(chunk) = next else {
+                    break;
+                };
+
+                buffer.extend_from_slice(&chunk);
+
+                while let Some(newline) = buffer.iter().position(|b| *b == b'\n') {
+                    let line = buffer.drain(..=newline).collect::<Vec<u8>>();
+                    let raw = std::str::from_utf8(&line)
+                        .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+                    let raw = raw.trim();
+
+                    if raw.is_empty() {
+                        continue;
+                    }
+
+                    let (content, done) = Self::parse_stream_line(raw)?;
+                    if let Some(content) = content {
+                        yield content;
+                    }
+
+                    if done {
+                        return;
+                    }
+                }
+            }
+
+            if !buffer.is_empty() {
+                let raw = std::str::from_utf8(&buffer)
+                    .map_err(|e| TramwayError::Intelligence(e.to_string()))?;
+                let raw = raw.trim();
+                if !raw.is_empty() {
+                    let (content, _) = Self::parse_stream_line(raw)?;
+                    if let Some(content) = content {
+                        yield content;
+                    }
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
     }
 }
