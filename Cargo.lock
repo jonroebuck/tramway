@@ -1632,6 +1632,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tramway-gemini"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tramway-core",
+]
+
+[[package]]
 name = "tramway-ollama"
 version = "0.1.0"
 dependencies = [
@@ -1639,6 +1652,19 @@ dependencies = [
  "async-trait",
  "reqwest 0.12.28",
  "serde",
+ "tokio",
+ "tramway-core",
+]
+
+[[package]]
+name = "tramway-openai"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
  "tokio",
  "tramway-core",
 ]
@@ -1668,7 +1694,9 @@ dependencies = [
  "tracing-subscriber",
  "tramway-claude",
  "tramway-core",
+ "tramway-gemini",
  "tramway-ollama",
+ "tramway-openai",
  "tramway-protocol-openai",
 ]
 
