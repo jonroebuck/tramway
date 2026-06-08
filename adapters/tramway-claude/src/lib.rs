@@ -14,11 +14,13 @@ mod tests {
     #[ignore]
     async fn claude_responds_to_prompt() {
         let claude = ClaudeIntelligence::new();
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("model".to_string(), "haiku".to_string());
         let ctx = IntelligenceContext {
             input: "Say hello".to_string(),
             system: "You are a helpful assistant.".to_string(),
             history: vec![],
-            metadata: Default::default(),
+            metadata,
         };
         let reply = claude.respond(ctx).await.unwrap();
         assert!(!reply.trim().is_empty());
@@ -26,16 +28,24 @@ mod tests {
 }
 
 use async_trait::async_trait;
-use tramway_core::{Intelligence, IntelligenceContext, TramwayError};
-use std::env;
-use serde::{Deserialize, Serialize};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::env;
+use tramway_core::{HistoryRole, Intelligence, IntelligenceContext, TramwayError};
 
 pub struct ClaudeIntelligence;
 
 impl ClaudeIntelligence {
     pub fn new() -> Self {
         ClaudeIntelligence
+    }
+
+    fn resolve_model(model: &str) -> &str {
+        match model {
+            "sonnet" => "claude-sonnet-4-5",
+            "haiku" => "claude-haiku-4-5-20251001",
+            other => other,
+        }
     }
 }
 
@@ -68,53 +78,47 @@ struct ClaudeContentBlock {
 
 #[async_trait]
 impl Intelligence for ClaudeIntelligence {
-    async fn respond(&self, context: IntelligenceContext, model: &str) -> Result<String, TramwayError> {
+    async fn respond(&self, context: IntelligenceContext) -> Result<String, TramwayError> {
         let api_key = env::var("ANTHROPIC_API_KEY")
             .map_err(|_| TramwayError::Intelligence("ANTHROPIC_API_KEY not set".to_string()))?;
 
-        let client = Client::new();
-
-        // Map shorthand model names to real Claude API model strings
-        let resolved_model = match model {
-            "sonnet" => "claude-sonnet-4-5",
-            "haiku"  => "claude-haiku-4-5-20251001",
-            other    => other,
-        };
-
-        let system = if context.system.is_empty() {
-            None
-        } else {
-            Some(context.system.clone())
-        };
-
-        let mut messages = vec![];
-
-        // Add history
-        for entry in &context.history {
-            let role = match entry.role {
-                tramway_core::HistoryRole::User => "user",
-                tramway_core::HistoryRole::Assistant => "assistant",
-                tramway_core::HistoryRole::System => continue,
-            };
-            messages.push(ClaudeMessage {
-                role: role.to_string(),
-                content: entry.content.clone(),
-            });
-        }
-
-        // Add current input
-        messages.push(ClaudeMessage {
-            role: "user".to_string(),
-            content: context.input.clone(),
-        });
+        let model = context
+            .metadata
+            .get("model")
+            .ok_or_else(|| TramwayError::Intelligence("model not specified in metadata".to_string()))?
+            .clone();
 
         let req_body = ClaudeRequest {
-            model: resolved_model.to_string(),
+            model: Self::resolve_model(&model).to_string(),
             max_tokens: 1024,
-            system,
-            messages,
+            system: if context.system.is_empty() {
+                None
+            } else {
+                Some(context.system.clone())
+            },
+            messages: context
+                .history
+                .iter()
+                .filter_map(|entry| {
+                    let role = match entry.role {
+                        HistoryRole::User => "user",
+                        HistoryRole::Assistant => "assistant",
+                        HistoryRole::System => return None,
+                    };
+
+                    Some(ClaudeMessage {
+                        role: role.to_string(),
+                        content: entry.content.clone(),
+                    })
+                })
+                .chain(std::iter::once(ClaudeMessage {
+                    role: "user".to_string(),
+                    content: context.input.clone(),
+                }))
+                .collect(),
         };
 
+        let client = Client::new();
         let resp = client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", api_key)
