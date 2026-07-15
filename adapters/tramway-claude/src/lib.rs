@@ -90,7 +90,7 @@ impl Intelligence for ClaudeIntelligence {
 
         let req_body = ClaudeRequest {
             model: Self::resolve_model(&model).to_string(),
-            max_tokens: 1024,
+            max_tokens: tramway_core::resolve_max_tokens(&context.metadata),
             system: if context.system.is_empty() {
                 None
             } else {

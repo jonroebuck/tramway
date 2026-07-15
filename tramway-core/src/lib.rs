@@ -30,6 +30,46 @@ use async_trait::async_trait;
 use futures_core::Stream;
 use thiserror::Error;
 
+/// Default value used by [`resolve_max_tokens`] when no valid `"max_tokens"`
+/// entry is present in the metadata map.
+pub const DEFAULT_MAX_TOKENS: u32 = 4096;
+
+/// Resolves the `max_tokens` value from a metadata map.
+///
+/// Looks up the `"max_tokens"` key and parses it as a [`u32`].  If the key is
+/// absent or its value cannot be parsed, a warning is logged and
+/// [`DEFAULT_MAX_TOKENS`] is returned.
+///
+/// # Examples
+///
+/// ```rust
+/// use std::collections::HashMap;
+/// use tramway_core::resolve_max_tokens;
+///
+/// let mut meta = HashMap::new();
+/// meta.insert("max_tokens".to_string(), "2048".to_string());
+/// assert_eq!(resolve_max_tokens(&meta), 2048);
+/// ```
+pub fn resolve_max_tokens(metadata: &HashMap<String, String>) -> u32 {
+    match metadata.get("max_tokens") {
+        Some(value) => value.parse::<u32>().unwrap_or_else(|_| {
+            log::warn!(
+                "max_tokens value {:?} could not be parsed as u32; using default {}",
+                value,
+                DEFAULT_MAX_TOKENS
+            );
+            DEFAULT_MAX_TOKENS
+        }),
+        None => {
+            log::warn!(
+                "max_tokens not set in metadata; using default {}",
+                DEFAULT_MAX_TOKENS
+            );
+            DEFAULT_MAX_TOKENS
+        }
+    }
+}
+
 /// The top-level error type for all tramway operations.
 ///
 /// Variants are intentionally broad so adapters can wrap provider-specific
@@ -180,6 +220,35 @@ mod tests {
             metadata: Default::default(),
         };
         assert_eq!(ctx.history.len(), 3);
+    }
+
+    #[test]
+    fn resolve_max_tokens_uses_valid_value() {
+        // Given metadata with a valid "max_tokens" value
+        // When resolve_max_tokens is called
+        // Then it returns the parsed value
+        let mut meta = HashMap::new();
+        meta.insert("max_tokens".to_string(), "2048".to_string());
+        assert_eq!(resolve_max_tokens(&meta), 2048);
+    }
+
+    #[test]
+    fn resolve_max_tokens_falls_back_on_missing_key() {
+        // Given metadata with no "max_tokens" key
+        // When resolve_max_tokens is called
+        // Then it returns DEFAULT_MAX_TOKENS
+        let meta: HashMap<String, String> = HashMap::new();
+        assert_eq!(resolve_max_tokens(&meta), DEFAULT_MAX_TOKENS);
+    }
+
+    #[test]
+    fn resolve_max_tokens_falls_back_on_non_numeric_value() {
+        // Given metadata with a non-numeric "max_tokens" value
+        // When resolve_max_tokens is called
+        // Then it returns DEFAULT_MAX_TOKENS
+        let mut meta = HashMap::new();
+        meta.insert("max_tokens".to_string(), "not_a_number".to_string());
+        assert_eq!(resolve_max_tokens(&meta), DEFAULT_MAX_TOKENS);
     }
 
     #[tokio::test]
