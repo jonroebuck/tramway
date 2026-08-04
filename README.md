@@ -1,3 +1,4 @@
+```markdown
 # tramway
 
 A lightweight, model-agnostic LLM gateway written in Rust.
@@ -18,39 +19,54 @@ POST /v1/chat/completions
 
 ## Providers
 
-| Provider | Model prefix | Configured via |
-|----------|--------------|----------------|
-| Ollama   | `ollama/`    | Auto-detected (no key needed) |
-| Claude   | `claude/`    | `ANTHROPIC_API_KEY` |
-| OpenAI   | `openai/`    | `OPENAI_API_KEY` |
-| Gemini   | `gemini/`    | `GEMINI_API_KEY` |
+| Provider | Model prefix | Configured via                |
+| -------- | ------------ | ----------------------------- |
+| Ollama   | `ollama/`    | **Required.** Auto-detected, or set `OLLAMA_URL` explicitly |
+| Claude   | `claude/`    | `ANTHROPIC_API_KEY` (optional) |
+| OpenAI   | `openai/`    | `OPENAI_API_KEY` (optional)   |
+| Gemini   | `gemini/`    | `GEMINI_API_KEY` (optional)   |
 
-Tramway starts with whatever providers are available. You don't need all four — if only `ANTHROPIC_API_KEY` is set, Tramway starts fine and just won't route `ollama/*` requests.
+Ollama is required — Tramway will not start unless a reachable Ollama instance is found. The other three providers are optional; Tramway starts fine with none, some, or all of their keys set, and simply won't route requests for whichever prefixes lack a key.
+
+### Ollama detection
+
+On startup, Tramway looks for Ollama in this order:
+
+1. **`OLLAMA_URL` environment variable**, if set. This is treated as a deliberate configuration, not a hint — Tramway tries only this address (3 attempts, 1s apart) and **fails to start** if it doesn't respond. Use this when Ollama is running on a different host (e.g. reachable over Tailscale).
+2. **Autodetection**, if `OLLAMA_URL` is not set. Tramway probes, in order:
+   - `http://ollama:11434` (bundled Docker sidecar)
+   - `http://host.docker.internal:11434` (native Ollama on Mac/Windows host)
+   - `http://localhost:11434` (native Ollama on Linux)
+
+If none of these respond, Tramway logs the failure and **exits non-zero** rather than starting in a degraded state — a missing Ollama connection is treated as a configuration error, not something to silently work around.
 
 ## Running
 
 **With Docker:**
-```bash
-docker run -e ANTHROPIC_API_KEY=sk-... -p 8080:8080 ghcr.io/jonroebuck/tramway:latest
+
+```
+docker run -e ANTHROPIC_API_KEY=sk-... -e OLLAMA_URL=http://ollama-host:11434 -p 8080:8080 ghcr.io/jonroebuck/tramway:latest
 ```
 
 **With Ollama bundled (Linux + NVIDIA GPU):**
-```bash
+
+```
 docker compose --profile bundled up
 ```
 
 **Natively:**
-```bash
+
+```
 cargo run -p tramway-server
 ```
 
-Tramway auto-detects a local or sidecar Ollama instance on startup. No configuration needed if Ollama is already running.
+If Ollama is already running locally, Tramway detects it automatically on startup — no configuration needed. If Ollama runs elsewhere, set `OLLAMA_URL` to point at it.
 
 ## Streaming responses
 
 Tramway supports OpenAI-compatible streaming on `/v1/chat/completions` when `"stream": true` is set:
 
-```bash
+```
 curl -N http://localhost:8080/v1/chat/completions \
   -H "content-type: application/json" \
   -d '{
@@ -69,6 +85,7 @@ The response is emitted as SSE `data:` events in `chat.completion.chunk` format,
 Tramway includes client libraries for Python and Java so you don't have to construct HTTP requests by hand. Both support a simple one-liner API and a builder API for multi-turn conversations, system prompts, and extensions.
 
 **Python** (`clients/tramway-py`):
+
 ```python
 from tramway import Tramway
 
@@ -84,9 +101,10 @@ response = (tramway.builder("claude/sonnet")
     .send())
 ```
 
-See [`clients/tramway-py/tramway/examples/basic.py`](clients/tramway-py/tramway/examples/basic.py) for a full working example.
+See [`clients/tramway-py/tramway/examples/basic.py`](https://github.com/jonroebuck/tramway/blob/main/clients/tramway-py/tramway/examples/basic.py) for a full working example.
 
 **Java** (`clients/tramway-java`):
+
 ```java
 Tramway tramway = new Tramway(); // defaults to http://localhost:8080
 
@@ -100,7 +118,7 @@ String response = tramway.builder("claude/sonnet")
     .send();
 ```
 
-See [`clients/tramway-java/src/main/java/io/tramway/examples/BasicExample.java`](clients/tramway-java/src/main/java/io/tramway/examples/BasicExample.java) for a full working example.
+See [`clients/tramway-java/src/main/java/io/tramway/examples/BasicExample.java`](https://github.com/jonroebuck/tramway/blob/main/clients/tramway-java/src/main/java/io/tramway/examples/BasicExample.java) for a full working example.
 
 Both clients also support Tramway extensions for passing trace IDs and routing hints, and accept a custom server URL for connecting to a non-default Tramway instance.
 
@@ -119,23 +137,26 @@ The adapter is compiled in but never needs to be published.
 
 ## Crates
 
-| Crate | Description |
-|-------|-------------|
-| `tramway-core` | `Intelligence` trait and `IntelligenceContext` — the stable port interface |
-| `tramway-server` | Axum HTTP server with OpenAI-compatible endpoints |
-| `tramway-ollama` | Ollama backend adapter |
-| `tramway-claude` | Anthropic Claude backend adapter |
-| `tramway-openai` | OpenAI backend adapter |
-| `tramway-gemini` | Google Gemini backend adapter |
-| `tramway-protocol-openai` | OpenAI wire format — decodes incoming requests and encodes responses |
+| Crate                     | Description                                                                |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `tramway-core`            | `Intelligence` trait and `IntelligenceContext` — the stable port interface |
+| `tramway-server`          | Axum HTTP server with OpenAI-compatible endpoints                          |
+| `tramway-ollama`          | Ollama backend adapter                                                     |
+| `tramway-claude`          | Anthropic Claude backend adapter                                           |
+| `tramway-openai`          | OpenAI backend adapter                                                     |
+| `tramway-gemini`          | Google Gemini backend adapter                                              |
+| `tramway-protocol-openai` | OpenAI wire format — decodes incoming requests and encodes responses       |
 
 ## Pulling models with the bundled profile
 
 If you're running the bundled Docker profile, use the included tramway-pull script to download models into the containerized Ollama instance:
 
-```bash
+```
 ./tramway-pull phi4
 ./tramway-pull llama3
+```
 
-This is equivalent to ollama pull but targets the Ollama container rather than a local installation. Models are persisted in a Docker volume and survive container restarts.
-If you have Ollama installed natively, just use ollama pull as normal — Tramway will detect it automatically on startup.
+This is equivalent to `ollama pull` but targets the Ollama container rather than a local installation. Models are persisted in a Docker volume and survive container restarts.
+
+If you have Ollama installed natively, just use `ollama pull` as normal — Tramway will detect it automatically on startup.
+```
