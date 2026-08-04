@@ -1,24 +1,48 @@
+use thiserror::Error;
 use tracing::{info, warn};
 
-/// Probe a list of candidate URLs to find a running Ollama instance.
+#[derive(Debug, Error)]
+pub enum OllamaDetectError {
+    #[error("OLLAMA_URL is set to '{0}' but Ollama did not respond there after 3 attempts")]
+    ConfiguredUrlUnreachable(String),
+
+    #[error("No Ollama instance found — tried {0} candidate address(es), none responded")]
+    NotFound(usize),
+}
+
+/// Detect a running Ollama instance.
 ///
-/// Returns the first URL that responds to `GET /api/tags`, or `None` if
-/// none of them are reachable. Tries each candidate with a short timeout
-/// and a couple of retries to handle Docker startup ordering.
-pub async fn detect_ollama() -> Option<String> {
+/// If `OLLAMA_URL` is set in the environment, only that address is tried —
+/// it's treated as a deliberate configuration, not a hint, so failure to
+/// reach it is an error rather than a fallback trigger.
+///
+/// If `OLLAMA_URL` is not set, falls back to probing common local/sidecar
+/// addresses. Either way, if nothing responds, returns an error rather
+/// than silently starting without Ollama support.
+pub async fn detect_ollama() -> Result<String, OllamaDetectError> {
+    if let Ok(configured) = std::env::var("OLLAMA_URL") {
+        return if ping(&configured).await {
+            info!("Ollama available at {configured} (from OLLAMA_URL)");
+            Ok(configured)
+        } else {
+            Err(OllamaDetectError::ConfiguredUrlUnreachable(configured))
+        };
+    }
+
     let candidates = vec![
-        "http://ollama:11434",                  // bundled Docker sidecar
-        "http://host.docker.internal:11434",    // native Ollama on Mac/Windows host
-        "http://localhost:11434",               // native Ollama on Linux
+        "http://ollama:11434",       // bundled Docker sidecar
+        "http://host.docker.internal:11434", // native Ollama on Mac/Windows host
+        "http://localhost:11434",    // native Ollama on Linux
     ];
 
-    for url in candidates {
+    for url in &candidates {
         if ping(url).await {
-            return Some(url.to_string());
+            info!("Ollama available at {url} (autodetected)");
+            return Ok(url.to_string());
         }
     }
 
-    None
+    Err(OllamaDetectError::NotFound(candidates.len()))
 }
 
 /// Returns true if Ollama is reachable at the given base URL.
@@ -36,7 +60,6 @@ async fn ping(base_url: &str) -> bool {
     for attempt in 1..=3 {
         match client.get(&url).send().await {
             Ok(resp) if resp.status().is_success() => {
-                info!("Ollama responded at {base_url} (attempt {attempt})");
                 return true;
             }
             Ok(resp) => {
@@ -46,7 +69,6 @@ async fn ping(base_url: &str) -> bool {
                 warn!("Ollama not reachable at {base_url}: {e} (attempt {attempt})");
             }
         }
-
         if attempt < 3 {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
